@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "./lib/supabase.js";
+import { supabase } from "./Lib/supabase.js";
 
 // ─── CONSTANTES ───────────────────────────────────────────────
 const SERVICES = [
