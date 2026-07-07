@@ -1,207 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "./Lib/supabase.js";
+import { supabase } from "./lib/supabase.js";
+import { SERVICES, PERMISSION_LABELS } from "./data/services.js";
+import { fmt, genTicket } from "./utils/format.js";
+import Toast from "./components/ui/Toast.jsx";
+import Button from "./components/ui/Button.jsx";
+import Input from "./components/ui/Input.jsx";
+import AuthPage from "./components/auth/AuthPage.jsx";
 
-// ─── CONSTANTES ───────────────────────────────────────────────
-const SERVICES = [
-  { id: 1, name: "Nettoyage à sec", items: [
-    { name: "Pantalon", price: 2500 }, { name: "Chemise", price: 2000 },
-    { name: "Veste", price: 3500 }, { name: "Robe", price: 4000 },
-    { name: "Costume complet", price: 8000 }, { name: "Manteau", price: 5000 },
-  ]},
-  { id: 2, name: "Repassage", items: [
-    { name: "Pantalon", price: 1000 }, { name: "Chemise", price: 800 },
-    { name: "Robe", price: 1500 }, { name: "Drap", price: 1200 },
-  ]},
-  { id: 3, name: "Lavage", items: [
-    { name: "Kg de linge", price: 1500 }, { name: "Couverture", price: 3000 },
-    { name: "Rideau", price: 2500 }, { name: "Tapis", price: 4000 },
-  ]},
-];
-
-const PERMISSION_LABELS = {
-  can_create_orders: "Créer des commandes",
-  can_view_orders: "Voir les commandes",
-  can_edit_orders: "Modifier le statut des commandes",
-  can_view_clients: "Voir les clients",
-  can_manage_inventory: "Gérer les stocks",
-  can_view_reports: "Voir les rapports financiers",
-  can_manage_staff: "Gérer le personnel",
-};
-
-const genTicket = () => {
-  const d = new Date();
-  return `QW${d.getFullYear().toString().slice(-2)}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}${Math.floor(Math.random()*9999).toString().padStart(4,"0")}`;
-};
-const fmt = (n) => Number(n || 0).toLocaleString("fr-FR") + " FCFA";
-
-// ─── COMPOSANTS UI ────────────────────────────────────────────
-const Toast = ({ toast }) => toast ? (
-  <div style={{
-    position: "fixed", top: 20, right: 20, zIndex: 9999,
-    background: toast.type === "error" ? "#ef4444" : "#22c55e",
-    color: "#fff", padding: "12px 20px", borderRadius: 10,
-    boxShadow: "0 4px 20px rgba(0,0,0,.2)", fontWeight: 600, fontSize: 14,
-    maxWidth: 320,
-  }}>{toast.msg}</div>
-) : null;
-
-const Input = ({ label, ...props }) => (
-  <div style={{ marginBottom: 14 }}>
-    {label && <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 5, color: "#374151" }}>{label}</label>}
-    <input {...props} style={{
-      width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 8,
-      padding: "10px 14px", fontSize: 14, boxSizing: "border-box", outline: "none",
-      fontFamily: "inherit", ...props.style
-    }} />
-  </div>
-);
-
-const Btn = ({ children, variant = "primary", ...props }) => {
-  const bg = variant === "primary" ? "#2563eb" : variant === "danger" ? "#ef4444" : variant === "purple" ? "#7c3aed" : "#f1f5f9";
-  const color = variant === "ghost" ? "#374151" : "#fff";
-  return (
-    <button {...props} style={{
-      background: props.disabled ? "#94a3b8" : bg, color,
-      border: "none", borderRadius: 8, padding: "10px 18px",
-      fontSize: 14, fontWeight: 600, cursor: props.disabled ? "not-allowed" : "pointer",
-      transition: "opacity .2s", ...props.style,
-    }}>{children}</button>
-  );
-};
-
-// ─── PAGE AUTH ────────────────────────────────────────────────
-const AuthPage = ({ showToast }) => {
-  const [mode, setMode] = useState("login"); // login | register
-  const [step, setStep] = useState(1); // register: 1=compte, 2=pressing
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    fullName: "", email: "", password: "",
-    pressingName: "", city: "", phone: "",
-  });
-
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-
-  const handleLogin = async () => {
-    if (!form.email || !form.password) { showToast("Remplissez tous les champs", "error"); return; }
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
-    if (error) showToast(error.message, "error");
-    setLoading(false);
-  };
-
-  const handleRegister = async () => {
-    if (!form.pressingName || !form.city) { showToast("Remplissez les infos du pressing", "error"); return; }
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signUp({ email: form.email, password: form.password });
-      if (error) throw error;
-      const userId = data.user?.id;
-
-      // Créer le pressing
-      const { data: pressing, error: pErr } = await supabase.from("pressings").insert({
-        name: form.pressingName, email: form.email,
-        phone: form.phone, city: form.city,
-        owner_id: userId,
-      }).select().single();
-      if (pErr) throw pErr;
-
-      // Créer le profil propriétaire
-      await supabase.from("profiles").insert({
-        id: userId, pressing_id: pressing.id,
-        full_name: form.fullName, email: form.email, role: "owner",
-      });
-
-      showToast("Compte créé avec succès ! Connectez-vous.");
-      setMode("login");
-    } catch (e) {
-      showToast(e.message, "error");
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#1e3a5f,#2563eb)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ background: "#fff", borderRadius: 20, padding: 36, width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,.2)" }}>
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 48 }}>🧺</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: "#1e3a5f", margin: "8px 0 4px" }}>QuickWash</h1>
-          <p style={{ color: "#64748b", fontSize: 13 }}>Plateforme de gestion de pressing</p>
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 4, marginBottom: 24 }}>
-          {[["login","Connexion"],["register","Inscription"]].map(([m, lbl]) => (
-            <button key={m} onClick={() => { setMode(m); setStep(1); }} style={{
-              flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
-              background: mode === m ? "#fff" : "transparent",
-              color: mode === m ? "#1e3a5f" : "#64748b",
-              fontWeight: mode === m ? 700 : 400, fontSize: 14,
-              boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,.08)" : "none",
-            }}>{lbl}</button>
-          ))}
-        </div>
-
-        {mode === "login" ? (
-          <>
-            <Input label="Email" type="email" placeholder="votre@email.com" value={form.email} onChange={e => set("email", e.target.value)} />
-            <Input label="Mot de passe" type="password" placeholder="••••••••" value={form.password} onChange={e => set("password", e.target.value)} />
-            <Btn onClick={handleLogin} disabled={loading} style={{ width: "100%", padding: 12, fontSize: 15 }}>
-              {loading ? "Connexion..." : "Se connecter"}
-            </Btn>
-          </>
-        ) : (
-          <>
-            {/* Indicateur d'étape */}
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 20, gap: 8 }}>
-              {[1, 2].map(s => (
-                <div key={s} style={{ display: "flex", alignItems: "center", gap: 8, flex: s < 2 ? 1 : "none" }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
-                    background: step >= s ? "#2563eb" : "#e2e8f0",
-                    color: step >= s ? "#fff" : "#94a3b8", fontWeight: 700, fontSize: 13,
-                  }}>{s}</div>
-                  <span style={{ fontSize: 12, color: step >= s ? "#2563eb" : "#94a3b8", fontWeight: step === s ? 700 : 400 }}>
-                    {s === 1 ? "Votre compte" : "Votre pressing"}
-                  </span>
-                  {s < 2 && <div style={{ flex: 1, height: 2, background: step > s ? "#2563eb" : "#e2e8f0", borderRadius: 2 }} />}
-                </div>
-              ))}
-            </div>
-
-            {step === 1 ? (
-              <>
-                <Input label="Nom complet *" placeholder="Jean Dupont" value={form.fullName} onChange={e => set("fullName", e.target.value)} />
-                <Input label="Email *" type="email" placeholder="votre@email.com" value={form.email} onChange={e => set("email", e.target.value)} />
-                <Input label="Mot de passe *" type="password" placeholder="Min. 6 caractères" value={form.password} onChange={e => set("password", e.target.value)} />
-                <Btn onClick={() => {
-                  if (!form.fullName || !form.email || !form.password) { showToast("Remplissez tous les champs", "error"); return; }
-                  setStep(2);
-                }} style={{ width: "100%", padding: 12 }}>
-                  Suivant →
-                </Btn>
-              </>
-            ) : (
-              <>
-                <Input label="Nom du pressing *" placeholder="Ex: Pressing Moderne" value={form.pressingName} onChange={e => set("pressingName", e.target.value)} />
-                <Input label="Ville *" placeholder="Ex: Lomé" value={form.city} onChange={e => set("city", e.target.value)} />
-                <Input label="Téléphone" placeholder="+228 XX XX XX XX" value={form.phone} onChange={e => set("phone", e.target.value)} />
-                <div style={{ display: "flex", gap: 10 }}>
-                  <Btn variant="ghost" onClick={() => setStep(1)} style={{ flex: 1, padding: 12 }}>← Retour</Btn>
-                  <Btn onClick={handleRegister} disabled={loading} style={{ flex: 2, padding: 12 }}>
-                    {loading ? "Création..." : "🚀 Créer mon pressing"}
-                  </Btn>
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── APP PRINCIPALE ──────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -219,7 +24,6 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Modal ajout employé
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({ fullName: "", email: "", password: "" });
   const [newPerms, setNewPerms] = useState({
@@ -227,7 +31,6 @@ export default function App() {
     can_view_clients: true, can_manage_inventory: false,
     can_view_reports: false, can_manage_staff: false,
   });
-  // Modal édition permissions
   const [editPermsFor, setEditPermsFor] = useState(null);
   const [editPerms, setEditPerms] = useState({});
 
@@ -236,14 +39,12 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Auth listener
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
 
-  // Charger profil & pressing
   useEffect(() => {
     if (!session) { setLoading(false); return; }
     const loadProfile = async () => {
@@ -265,7 +66,6 @@ export default function App() {
   const isOwner = profile?.role === "owner";
   const can = (perm) => isOwner || permissions?.[perm] === true;
 
-  // Charger données
   const fetchAll = useCallback(async () => {
     if (!pressing?.id) return;
     const [{ data: o }, { data: c }, { data: s }] = await Promise.all([
@@ -418,7 +218,6 @@ export default function App() {
     ? orders.filter(o => o.ticket_number?.toLowerCase().includes(search.toLowerCase()) || o.client_name?.toLowerCase().includes(search.toLowerCase()))
     : orders;
 
-  // Navigation selon rôle et permissions
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: "📊", show: true },
     { id: "newOrder", label: "Nouvelle commande", icon: "➕", show: can("can_create_orders") },
@@ -440,7 +239,6 @@ export default function App() {
     <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'Segoe UI',sans-serif", background: "#f1f5f9" }}>
       <Toast toast={toast} />
 
-      {/* Modal ajout employé */}
       {showAddStaff && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
@@ -459,14 +257,13 @@ export default function App() {
               ))}
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <Btn variant="ghost" onClick={() => setShowAddStaff(false)} style={{ flex: 1 }}>Annuler</Btn>
-              <Btn onClick={addEmployee} style={{ flex: 2 }}>✅ Ajouter l'employé</Btn>
+              <Button variant="ghost" onClick={() => setShowAddStaff(false)} style={{ flex: 1 }}>Annuler</Button>
+              <Button onClick={addEmployee} style={{ flex: 2 }}>✅ Ajouter l'employé</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal édition permissions */}
       {editPermsFor && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: "100%", maxWidth: 440 }}>
@@ -480,14 +277,13 @@ export default function App() {
               </label>
             ))}
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-              <Btn variant="ghost" onClick={() => setEditPermsFor(null)} style={{ flex: 1 }}>Annuler</Btn>
-              <Btn onClick={savePermissions} style={{ flex: 2 }}>💾 Enregistrer</Btn>
+              <Button variant="ghost" onClick={() => setEditPermsFor(null)} style={{ flex: 1 }}>Annuler</Button>
+              <Button onClick={savePermissions} style={{ flex: 2 }}>💾 Enregistrer</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Sidebar */}
       <div style={{ width: 220, background: "#1e3a5f", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "24px 16px 20px", borderBottom: "1px solid #2d4f7c", textAlign: "center" }}>
           <div style={{ fontSize: 32 }}>🧺</div>
@@ -520,10 +316,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Contenu */}
       <div style={{ flex: 1, overflow: "auto" }}>
 
-        {/* DASHBOARD */}
         {page === "dashboard" && (
           <div style={{ padding: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, color: "#1e293b" }}>
@@ -587,7 +381,6 @@ export default function App() {
           </div>
         )}
 
-        {/* NOUVELLE COMMANDE */}
         {page === "newOrder" && can("can_create_orders") && (
           <div style={{ padding: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, color: "#1e293b" }}>Nouvelle Commande</h1>
@@ -667,14 +460,13 @@ export default function App() {
                       <option value="mobile money">Mobile Money</option>
                     </select>
                   </div>
-                  <Btn onClick={createOrder} style={{ width: "100%", padding: 11 }}>✅ Créer la commande</Btn>
+                  <Button onClick={createOrder} style={{ width: "100%", padding: 11 }}>✅ Créer la commande</Button>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* COMMANDES */}
         {page === "orders" && can("can_view_orders") && (
           <div style={{ padding: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, color: "#1e293b" }}>Commandes ({orders.length})</h1>
@@ -731,7 +523,6 @@ export default function App() {
           </div>
         )}
 
-        {/* CLIENTS */}
         {page === "clients" && can("can_view_clients") && (
           <div style={{ padding: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, color: "#1e293b" }}>Clients ({clients.length})</h1>
@@ -772,12 +563,11 @@ export default function App() {
           </div>
         )}
 
-        {/* PERSONNEL */}
         {page === "staff" && isOwner && (
           <div style={{ padding: 24 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1e293b" }}>Personnel ({staff.length})</h1>
-              <Btn onClick={() => setShowAddStaff(true)}>➕ Ajouter un employé</Btn>
+              <Button onClick={() => setShowAddStaff(true)}>➕ Ajouter un employé</Button>
             </div>
             {staff.length === 0 ? (
               <div style={{ background: "#fff", borderRadius: 14, padding: 48, textAlign: "center", color: "#94a3b8", boxShadow: "0 2px 8px rgba(0,0,0,.06)" }}>
@@ -805,10 +595,10 @@ export default function App() {
                           {activePerms.length === 0 && <span style={{ color: "#94a3b8", fontSize: 12 }}>Aucune permission active</span>}
                         </div>
                       </div>
-                      <Btn variant="ghost" onClick={() => {
+                      <Button variant="ghost" onClick={() => {
                         setEditPermsFor(emp);
                         setEditPerms(emp.permissions?.[0] || {});
-                      }} style={{ fontSize: 12, padding: "7px 14px" }}>🔐 Permissions</Btn>
+                      }} style={{ fontSize: 12, padding: "7px 14px" }}>🔐 Permissions</Button>
                     </div>
                   );
                 })}
@@ -817,7 +607,6 @@ export default function App() {
           </div>
         )}
 
-        {/* RAPPORT IA */}
         {page === "rapport" && (isOwner || can("can_view_reports")) && (
           <div style={{ padding: 24 }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, color: "#1e293b" }}>🤖 Rapport IA Mensuel</h1>
@@ -825,9 +614,9 @@ export default function App() {
               Analyse de {pressing?.name} — {new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
             </p>
             <div style={{ background: "#fff", borderRadius: 14, padding: 20, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,.06)", display: "flex", justifyContent: "flex-end" }}>
-              <Btn variant="purple" onClick={generateAIReport} disabled={aiLoading} style={{ padding: "11px 24px" }}>
+              <Button variant="purple" onClick={generateAIReport} disabled={aiLoading} style={{ padding: "11px 24px" }}>
                 {aiLoading ? "⏳ Analyse en cours..." : "🤖 Générer le rapport"}
-              </Btn>
+              </Button>
             </div>
             {aiReport && (
               <div style={{ display: "grid", gap: 14 }}>
@@ -884,4 +673,4 @@ export default function App() {
       </div>
     </div>
   );
-}
+        }
